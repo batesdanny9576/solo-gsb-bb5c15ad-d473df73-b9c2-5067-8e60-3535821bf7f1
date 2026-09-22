@@ -9,12 +9,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import or_
-from sqlalchemy.orm import Session, aliased
+from sqlalchemy.orm import Session
 
 from . import config, matching
 from .database import get_db, init_db
-from .models import Event, ForbiddenPair, Participant
-from .schemas import EventCreate, ParticipantCreate, PairsCreate
+from .models import Event, ForbiddenPair, Participant, PreferenceCard
+from .schemas import EventCreate, ParticipantCreate, PairsCreate, PreferenceUpdate
 
 
 @asynccontextmanager
@@ -64,14 +64,36 @@ def ensure_unlocked(event: Event) -> None:
         raise HTTPException(status_code=409, detail="抽签已完成，参与者与禁配关系已锁定")
 
 
+def preference_filled(card: PreferenceCard | None) -> bool:
+    """已填写 = 三个字段中至少有一个非空；全空视为未填写。"""
+    return bool(card and (card.wish_text or card.avoid_text or card.size_text))
+
+
+def preference_out(card: PreferenceCard | None) -> dict | None:
+    """偏好卡内容。仅用于：本人查看自己的卡片、一次性揭晓时展示收礼人的卡片。
+
+    从未填写（或三项全空）返回 None；组织者序列化路径绝不调用本函数。
+    """
+    if card is None:
+        return None
+    return {
+        "wish_text": card.wish_text,
+        "avoid_text": card.avoid_text,
+        "size_text": card.size_text,
+        "updated_at": card.updated_at.isoformat(),
+    }
+
+
 def participant_out(p: Participant) -> dict:
-    # 注意：绝不包含 recipient_id，组织者只能看到“是否已揭晓”
+    # 注意：绝不包含 recipient_id 与偏好卡内容，组织者只能看到
+    # “是否已揭晓”和“是否已填写偏好卡”
     return {
         "id": p.id,
         "name": p.name,
         "reveal_token": p.reveal_token,
         "reveal_url": f"/reveal/{p.reveal_token}",
         "revealed": p.revealed,
+        "preference_filled": preference_filled(p.preference_card),
         "created_at": p.created_at.isoformat(),
     }
 
@@ -243,11 +265,10 @@ def draw(
 
 
 # ---------------------------------------------------------------------------
-# 参与者一次性揭晓
+# 参与者一次性揭晓与礼物偏好卡
 # ---------------------------------------------------------------------------
 
-@app.get("/api/reveal/{reveal_token}")
-def reveal_status(reveal_token: str, db: Session = Depends(get_db)):
+def get_participant_by_token(db: Session, reveal_token: str) -> Participant:
     p = (
         db.query(Participant)
         .filter(Participant.reveal_token == reveal_token)
@@ -255,24 +276,59 @@ def reveal_status(reveal_token: str, db: Session = Depends(get_db)):
     )
     if p is None:
         raise HTTPException(status_code=404, detail="链接无效")
+    return p
+
+
+@app.get("/api/reveal/{reveal_token}")
+def reveal_status(reveal_token: str, db: Session = Depends(get_db)):
+    p = get_participant_by_token(db, reveal_token)
     event = db.get(Event, p.event_id)
     return {
         "event_name": event.name,
         "participant_name": p.name,
         "status": event.status,
         "revealed": p.revealed,
+        # 抽签前可反复填写修改，抽签完成即锁定（只读）
+        "preference_editable": event.status != "drawn",
+        "preference_filled": preference_filled(p.preference_card),
+        # 本人查看自己的卡片：仅此链接持有者本人可见
+        "preference": preference_out(p.preference_card),
+    }
+
+
+@app.put("/api/reveal/{reveal_token}/preference")
+def update_preference(
+    reveal_token: str,
+    payload: PreferenceUpdate,
+    db: Session = Depends(get_db),
+):
+    """本人凭自己的揭晓链接填写 / 修改偏好卡（upsert，可反复修改）。
+
+    抽签完成即锁定；无需其他凭证——持有一次性揭晓链接即视为本人。
+    """
+    p = get_participant_by_token(db, reveal_token)
+    event = db.get(Event, p.event_id)
+    if event.status == "drawn":
+        raise HTTPException(status_code=409, detail="抽签已完成，礼物偏好卡已锁定，无法再修改")
+
+    card = p.preference_card
+    if card is None:
+        card = PreferenceCard(participant_id=p.id)
+        db.add(card)
+    card.wish_text = payload.wish_text
+    card.avoid_text = payload.avoid_text
+    card.size_text = payload.size_text
+    db.commit()
+    db.refresh(card)
+    return {
+        "preference_filled": preference_filled(card),
+        "preference": preference_out(card),
     }
 
 
 @app.post("/api/reveal/{reveal_token}")
 def do_reveal(reveal_token: str, db: Session = Depends(get_db)):
-    p = (
-        db.query(Participant)
-        .filter(Participant.reveal_token == reveal_token)
-        .first()
-    )
-    if p is None:
-        raise HTTPException(status_code=404, detail="链接无效")
+    p = get_participant_by_token(db, reveal_token)
 
     event = db.get(Event, p.event_id)
     if event.status != "drawn":
@@ -293,19 +349,18 @@ def do_reveal(reveal_token: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=409, detail="该链接已经揭晓过，结果只能查看一次")
     db.commit()
 
-    # 提交后重新查询收礼人名字（不经过会话缓存）
-    giver = aliased(Participant)
-    receiver = aliased(Participant)
-    row = (
-        db.query(giver.name, receiver.name)
-        .join(receiver, giver.recipient_id == receiver.id)
-        .filter(giver.id == p.id)
+    # 提交后重新查询收礼人及其偏好卡（不经过会话缓存）。
+    # 偏好卡仅在此一次性成功揭晓的响应中随收礼人暴露给对应送礼人。
+    receiver = (
+        db.query(Participant)
+        .filter(Participant.id == p.recipient_id)
         .one()
     )
     return {
         "event_name": event.name,
-        "participant_name": row[0],
-        "recipient_name": row[1],
+        "participant_name": p.name,
+        "recipient_name": receiver.name,
+        "recipient_preference": preference_out(receiver.preference_card),
     }
 
 

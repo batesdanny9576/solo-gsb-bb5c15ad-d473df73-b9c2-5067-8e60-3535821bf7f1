@@ -2,6 +2,18 @@
 from pydantic import BaseModel, Field, field_validator
 
 
+class PreferenceUpdate(BaseModel):
+    # 礼物偏好卡：想要 / 忌讳 / 尺码备注；均可留空，长度上限 1000
+    wish_text: str = Field(default="", max_length=1000)
+    avoid_text: str = Field(default="", max_length=1000)
+    size_text: str = Field(default="", max_length=1000)
+
+    @field_validator("wish_text", "avoid_text", "size_text")
+    @classmethod
+    def _strip(cls, v: str) -> str:
+        return v.strip()
+
+
 class EventCreate(BaseModel):
     name: str = Field(default="秘密赠礼", max_length=200)
     participants: list[str] = Field(default_factory=list)

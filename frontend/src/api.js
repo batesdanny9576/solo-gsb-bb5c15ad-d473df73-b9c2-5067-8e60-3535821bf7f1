@@ -38,3 +38,6 @@ export const drawEvent = (id, token) =>
   request(`/api/events/${id}/draw`, { method: 'POST', organizerToken: token })
 export const getReveal = (revealToken) => request(`/api/reveal/${revealToken}`)
 export const postReveal = (revealToken) => request(`/api/reveal/${revealToken}`, { method: 'POST' })
+// 本人填写 / 修改礼物偏好卡（抽签前可反复修改，抽签后后端返回 409）
+export const savePreference = (revealToken, payload) =>
+  request(`/api/reveal/${revealToken}/preference`, { method: 'PUT', body: payload })

@@ -119,6 +119,41 @@ button:disabled { opacity: 0.6; cursor: default; }
 .revealed { color: var(--ok); font-style: normal; font-size: 13px; }
 .unrevealed { color: #b45309; font-style: normal; font-size: 13px; }
 
+.reveal-state { display: inline-flex; align-items: center; gap: 10px; }
+
+.pref-section { text-align: left; margin-top: 18px; }
+.pref-section h2 { margin-top: 18px; }
+
+.pref-form { margin-top: 14px; text-align: left; }
+
+.pref-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 6px 16px;
+  margin-top: 10px;
+  background: #f8fafc;
+}
+.pref-row { padding: 10px 0; border-bottom: 1px solid var(--line); }
+.pref-row:last-child { border-bottom: none; }
+.pref-label { display: block; font-weight: 600; font-size: 14px; margin-bottom: 4px; }
+.pref-text {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.save-ok {
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  color: #065f46;
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin: 14px 0 0;
+  font-size: 14px;
+}
+
 .token-form { display: flex; gap: 8px; margin-top: 16px; }
 .token-form input { flex: 1; }
 .token-form .primary { margin-top: 0; }

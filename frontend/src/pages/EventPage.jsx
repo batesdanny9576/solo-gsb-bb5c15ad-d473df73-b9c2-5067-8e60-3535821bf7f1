@@ -132,7 +132,7 @@ export default function EventPage() {
 
   async function handleDraw() {
     setError('')
-    if (!window.confirm('确认发起抽签？抽签完成后参与者名单与禁配关系将锁定。')) return
+    if (!window.confirm('确认发起抽签？抽签完成后参与者名单、禁配关系与所有人的礼物偏好卡都将锁定。')) return
     try {
       await drawEvent(id, token)
       await refresh()
@@ -198,9 +198,16 @@ export default function EventPage() {
                   )}
                 </span>
               ) : (
-                <button className="link-btn danger" onClick={() => handleDeleteName(p.id)}>
-                  删除
-                </button>
+                <span className="reveal-state">
+                  {p.preference_filled ? (
+                    <em className="revealed">偏好卡已填</em>
+                  ) : (
+                    <em className="unrevealed">偏好卡未填</em>
+                  )}
+                  <button className="link-btn danger" onClick={() => handleDeleteName(p.id)}>
+                    删除
+                  </button>
+                </span>
               )}
             </li>
           ))}
@@ -262,28 +269,40 @@ export default function EventPage() {
         </section>
       )}
 
-      {drawn && (
-        <section className="block">
-          <h2>揭晓链接（分发给对应参与者）</h2>
+      <section className="block">
+        <h2>{drawn ? '揭晓链接（分发给对应参与者）' : '参与者专属链接（抽签前即可分发）'}</h2>
+        {drawn ? (
           <p className="hint">
-            每条链接只能成功揭晓一次；本页不会显示任何人的抽签结果，仅显示是否已揭晓。
+            每条链接只能成功揭晓一次；本页不会显示任何人的抽签结果或偏好卡内容，
+            仅显示是否已揭晓。
           </p>
-          <ul className="links">
-            {event.participants.map((p) => (
-              <li key={p.id}>
-                <div className="link-row">
-                  <strong>{p.name}</strong>
+        ) : (
+          <p className="hint">
+            参与者打开自己的链接即可填写 / 修改礼物偏好卡，抽签完成后自动锁定。
+            本页只能看到“已填 / 未填”，无法查看任何卡片内容；抽签前链接也不会暴露匹配结果。
+          </p>
+        )}
+        <ul className="links">
+          {event.participants.map((p) => (
+            <li key={p.id}>
+              <div className="link-row">
+                <strong>{p.name}</strong>
+                {drawn ? (
                   <span className={p.revealed ? 'revealed' : 'unrevealed'}>
                     {p.revealed ? '已揭晓' : '未揭晓'}
                   </span>
-                  <CopyButton text={fullLink(p.reveal_url)} />
-                </div>
-                <code className="link-url">{fullLink(p.reveal_url)}</code>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+                ) : (
+                  <span className={p.preference_filled ? 'revealed' : 'unrevealed'}>
+                    {p.preference_filled ? '偏好卡已填' : '偏好卡未填'}
+                  </span>
+                )}
+                <CopyButton text={fullLink(p.reveal_url)} />
+              </div>
+              <code className="link-url">{fullLink(p.reveal_url)}</code>
+            </li>
+          ))}
+        </ul>
+      </section>
     </div>
   )
 }

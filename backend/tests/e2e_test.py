@@ -208,6 +208,152 @@ check(len(r.json()["participants"]) == 2 and len(r.json()["forbidden_pairs"]) ==
 r = client.get("/health")
 check(r.status_code == 200 and r.json()["status"] == "ok", "health ok")
 
+# ---------- 8. 礼物偏好卡 ----------
+print("== 礼物偏好卡 ==")
+r = client.post("/api/events", json={
+    "name": "偏好局",
+    "participants": ["甲", "乙", "丙", "丁"],
+})
+check(r.status_code == 201, f"创建偏好局 -> {r.status_code}")
+pev = r.json()
+peid, ptok = pev["id"], pev["organizer_token"]
+PH = {"X-Organizer-Token": ptok}
+ta, tb, tc, td = pev["participants"]
+tokA, tokB, tokC = ta["reveal_token"], tb["reveal_token"], tc["reveal_token"]
+
+# 8.1 初始状态：未填写、可编辑，且状态响应中不含卡片内容
+r = client.get(f"/api/reveal/{tokA}")
+j = r.json()
+check(j["preference_filled"] is False and j["preference"] is None, "初始偏好卡为空")
+check(j["preference_editable"] is True, "抽签前可编辑")
+check("wish_text" not in r.text and "avoid_text" not in r.text and "size_text" not in r.text,
+      "空卡响应中不出现任何偏好内容字段")
+
+# 8.2 本人凭链接填写并可反复修改
+r = client.put(f"/api/reveal/{tokA}/preference", json={
+    "wish_text": "想要围巾", "avoid_text": "忌羊毛", "size_text": "L 码",
+})
+check(r.status_code == 200, f"填写偏好卡 -> {r.status_code}")
+check(r.json()["preference_filled"] is True, "填写后标记为已填")
+
+r = client.put(f"/api/reveal/{tokA}/preference", json={
+    "wish_text": "改想要手套", "avoid_text": "忌羊毛", "size_text": "M 码",
+})
+j = r.json()
+check(j["preference"]["wish_text"] == "改想要手套", "反复修改生效（upsert）")
+
+r = client.get(f"/api/reveal/{tokA}")
+j = r.json()
+check(j["preference"]["wish_text"] == "改想要手套", "GET 状态返回本人最新卡片")
+check(j["preference_editable"] is True, "抽签前仍可编辑")
+
+# 全空保存 -> 视为未填写（卡片存在但无内容）
+r = client.put(f"/api/reveal/{tokA}/preference", json={
+    "wish_text": "  ", "avoid_text": "", "size_text": "",
+})
+check(r.status_code == 200 and r.json()["preference_filled"] is False, "全空保存视为未填写")
+# 恢复一个有内容的版本供后续揭晓使用
+r = client.put(f"/api/reveal/{tokA}/preference", json={
+    "wish_text": "甲的愿望", "avoid_text": "甲的忌讳", "size_text": "甲的尺码",
+})
+
+# 乙、丙各填一张（丁故意不填）
+client.put(f"/api/reveal/{tokB}/preference", json={
+    "wish_text": "乙的愿望", "avoid_text": "乙的忌讳", "size_text": "乙的尺码",
+})
+client.put(f"/api/reveal/{tokC}/preference", json={
+    "wish_text": "丙的愿望", "avoid_text": "", "size_text": "",
+})
+
+# 8.3 隐私：别人的链接 GET 不到他人卡片；状态中不含任何他人内容
+r = client.get(f"/api/reveal/{tokB}")
+check("甲的愿望" not in r.text and "丙的愿望" not in r.text,
+      "B 的链接状态中不含 A/C 的偏好内容")
+
+# 8.4 组织者接口只能看到“是否已填写”，看不到内容（即使在管理链接里）
+r = client.get(f"/api/events/{peid}", headers=PH)
+raw = r.text
+filled = {p["name"]: p["preference_filled"] for p in r.json()["participants"]}
+check(filled == {"甲": True, "乙": True, "丙": True, "丁": False},
+      f"组织者只见填写标记: {filled}")
+check("wish_text" not in raw and "甲的愿望" not in raw and "乙的忌讳" not in raw,
+      "组织者响应中不含任何偏好卡内容字段/文本")
+
+# 8.5 抽签成功后锁定：PUT 被拒；GET 仍可见本人只读卡片
+r = client.post(f"/api/events/{peid}/draw", headers=PH)
+check(r.status_code == 200, f"偏好局抽签 -> {r.status_code}")
+drawn_ev = r.json()
+
+r = client.put(f"/api/reveal/{tokA}/preference", json={
+    "wish_text": "抽签后偷改", "avoid_text": "", "size_text": "",
+})
+check(r.status_code == 409, f"抽签后偏好卡锁定 -> {r.status_code}")
+
+r = client.get(f"/api/reveal/{tokA}")
+j = r.json()
+check(j["preference_editable"] is False, "抽签后标记为不可编辑")
+check(j["preference"]["wish_text"] == "甲的愿望", "抽签后本人仍能看到自己的卡片（原样未变）")
+
+# 8.6 一次性揭晓：结果中带的是“收礼人”的偏好卡，且全应用只此一处暴露
+# 直接查库找出每人的收礼人，验证响应与之一致
+from app.models import Participant as _P  # noqa: E402
+from app.database import SessionLocal  # noqa: E402
+_db = SessionLocal()
+try:
+    recipient_of = {}
+    for giver in _db.query(_P).filter_by(event_id=peid).all():
+        rec = _db.get(_P, giver.recipient_id)
+        recipient_of[giver.name] = rec.name
+finally:
+    _db.close()
+
+token_by_name = {p["name"]: p["reveal_token"] for p in drawn_ev["participants"]}
+card_wishes = {"甲": "甲的愿望", "乙": "乙的愿望", "丙": "丙的愿望", "丁": None}
+
+for giver_name in ("甲", "乙", "丙", "丁"):
+    gtok = token_by_name[giver_name]
+    r = client.post(f"/api/reveal/{gtok}")
+    check(r.status_code == 200, f"{giver_name} 揭晓成功")
+    j = r.json()
+    rec_name = recipient_of[giver_name]
+    check(j["recipient_name"] == rec_name, f"{giver_name} 的收礼人为 {rec_name}")
+    rp = j["recipient_preference"]
+    if card_wishes[rec_name] is None:
+        check(rp is None, f"{giver_name} 揭晓：{rec_name} 未填卡 -> recipient_preference 为 null")
+    else:
+        check(rp is not None and rp["wish_text"] == card_wishes[rec_name],
+              f"{giver_name} 揭晓响应恰为收礼人 {rec_name} 的卡片")
+    # 不包含任何“非收礼人”的卡片文本
+    others = [w for n, w in card_wishes.items() if n != rec_name and w]
+    check(all(w not in r.text for w in others),
+          f"{giver_name} 的揭晓响应不含其他参与者的卡片内容")
+
+# 8.7 重复揭晓仍守一次性规则，且不再次泄露偏好卡
+r = client.post(f"/api/reveal/{tokA}")
+check(r.status_code == 409 and "甲的愿望" not in r.text,
+      "二次揭晓 409 且响应不含收礼人卡片")
+r = client.get(f"/api/reveal/{tokA}")
+check(r.json()["revealed"] is True and "乙的愿望" not in r.text,
+      "已揭晓后 GET 状态仍不含他人卡片")
+
+# 8.8 无效链接
+r = client.put("/api/reveal/does-not-exist/preference",
+               json={"wish_text": "x", "avoid_text": "", "size_text": ""})
+check(r.status_code == 404, "无效链接填写偏好卡 404")
+
+# 8.9 超长内容被拒（422）
+r = client.post("/api/events", json={"name": "长度局", "participants": ["x", "y"]})
+lv = r.json()
+ltok = lv["participants"][0]["reveal_token"]
+r = client.put(f"/api/reveal/{ltok}/preference",
+               json={"wish_text": "长" * 1001, "avoid_text": "", "size_text": ""})
+check(r.status_code == 422, f"偏好内容超长 422 -> {r.status_code}")
+
+# 8.10 组织者在锁定后仍只见布尔标记
+r = client.get(f"/api/events/{peid}", headers=PH)
+check("wish_text" not in r.text and "甲的愿望" not in r.text,
+      "锁定后组织者依然读不到偏好内容")
+
 print()
 if fails:
     print(f"{len(fails)} 项失败")
