@@ -119,6 +119,34 @@ button:disabled { opacity: 0.6; cursor: default; }
 .revealed { color: var(--ok); font-style: normal; font-size: 13px; }
 .unrevealed { color: #b45309; font-style: normal; font-size: 13px; }
 
+.pref-filled { color: var(--ok); font-style: normal; font-size: 13px; }
+.pref-empty { color: var(--muted); font-style: normal; font-size: 13px; }
+
+.reveal-state { display: flex; align-items: center; gap: 12px; }
+
+.pref-form {
+  margin-top: 18px;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 8px 18px 16px;
+  background: #f8fafc;
+}
+
+.pref-locked { margin: 18px 0 6px; text-align: left; }
+.pref-locked h2, .result h2 { font-size: 16px; margin-bottom: 10px; }
+
+.pref-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px 16px;
+  background: #f8fafc;
+  text-align: left;
+}
+.pref-row + .pref-row { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--line); }
+.pref-label { display: inline-block; font-weight: 700; font-size: 14px; margin-bottom: 4px; }
+.pref-text { margin: 0; font-size: 14px; line-height: 1.7; white-space: pre-wrap; word-break: break-word; }
+
 .token-form { display: flex; gap: 8px; margin-top: 16px; }
 .token-form input { flex: 1; }
 .token-form .primary { margin-top: 0; }

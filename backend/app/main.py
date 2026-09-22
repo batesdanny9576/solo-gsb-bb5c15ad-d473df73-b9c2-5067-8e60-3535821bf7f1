@@ -13,8 +13,8 @@ from sqlalchemy.orm import Session, aliased
 
 from . import config, matching
 from .database import get_db, init_db
-from .models import Event, ForbiddenPair, Participant
-from .schemas import EventCreate, ParticipantCreate, PairsCreate
+from .models import Event, ForbiddenPair, Participant, _utcnow
+from .schemas import EventCreate, ParticipantCreate, PairsCreate, PreferenceUpdate
 
 
 @asynccontextmanager
@@ -64,15 +64,50 @@ def ensure_unlocked(event: Event) -> None:
         raise HTTPException(status_code=409, detail="抽签已完成，参与者与禁配关系已锁定")
 
 
+def preference_filled(p: Participant) -> bool:
+    """偏好卡是否已填写：三个字段至少一个非空。
+
+    这是组织者侧唯一可见的偏好信息，具体内容绝不外泄。
+    """
+    return bool(p.preference_wishes or p.preference_dislikes or p.preference_sizes)
+
+
 def participant_out(p: Participant) -> dict:
-    # 注意：绝不包含 recipient_id，组织者只能看到“是否已揭晓”
+    # 注意：绝不包含 recipient_id 与偏好卡内容，组织者只能看到“是否已揭晓 / 已填写”
     return {
         "id": p.id,
         "name": p.name,
         "reveal_token": p.reveal_token,
         "reveal_url": f"/reveal/{p.reveal_token}",
         "revealed": p.revealed,
+        "preference_filled": preference_filled(p),
         "created_at": p.created_at.isoformat(),
+    }
+
+
+def own_preference_out(p: Participant) -> dict:
+    """偏好卡内容：仅用于本人通过自己的揭晓链接读取。"""
+    return {
+        "wishes": p.preference_wishes or "",
+        "dislikes": p.preference_dislikes or "",
+        "sizes": p.preference_sizes or "",
+        "filled": preference_filled(p),
+        "updated_at": p.preference_updated_at.isoformat()
+        if p.preference_updated_at
+        else None,
+    }
+
+
+def recipient_preference_out(
+    name: str, wishes: str | None, dislikes: str | None, sizes: str | None
+) -> dict:
+    """收礼人偏好卡：只在一次性揭晓成功的响应中返回给其送礼人。"""
+    return {
+        "name": name,
+        "wishes": wishes or "",
+        "dislikes": dislikes or "",
+        "sizes": sizes or "",
+        "filled": bool(wishes or dislikes or sizes),
     }
 
 
@@ -256,12 +291,43 @@ def reveal_status(reveal_token: str, db: Session = Depends(get_db)):
     if p is None:
         raise HTTPException(status_code=404, detail="链接无效")
     event = db.get(Event, p.event_id)
+    # 本人可查看自己的偏好卡内容；任何他人的偏好（含收礼对象）都不出现于此接口
     return {
         "event_name": event.name,
         "participant_name": p.name,
         "status": event.status,
         "revealed": p.revealed,
+        "preference": own_preference_out(p),
     }
+
+
+@app.put("/api/reveal/{reveal_token}/preferences")
+def update_preferences(
+    payload: PreferenceUpdate,
+    reveal_token: str,
+    db: Session = Depends(get_db),
+):
+    """参与者通过自己的揭晓链接填写 / 修改偏好卡；抽签完成即锁定。"""
+    p = (
+        db.query(Participant)
+        .filter(Participant.reveal_token == reveal_token)
+        .first()
+    )
+    if p is None:
+        raise HTTPException(status_code=404, detail="链接无效")
+
+    event = db.get(Event, p.event_id)
+    if event.status == "drawn":
+        raise HTTPException(status_code=409, detail="抽签已完成，偏好卡已锁定，无法再修改")
+
+    p.preference_wishes = payload.wishes
+    p.preference_dislikes = payload.dislikes
+    p.preference_sizes = payload.sizes
+    # 全部清空时同步清掉更新时间：回到“未填写”状态
+    p.preference_updated_at = _utcnow() if preference_filled(p) else None
+    db.commit()
+    db.refresh(p)
+    return own_preference_out(p)
 
 
 @app.post("/api/reveal/{reveal_token}")
@@ -293,11 +359,17 @@ def do_reveal(reveal_token: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=409, detail="该链接已经揭晓过，结果只能查看一次")
     db.commit()
 
-    # 提交后重新查询收礼人名字（不经过会话缓存）
+    # 提交后重新查询收礼人及其偏好卡（不经过会话缓存）
     giver = aliased(Participant)
     receiver = aliased(Participant)
     row = (
-        db.query(giver.name, receiver.name)
+        db.query(
+            giver.name,
+            receiver.name,
+            receiver.preference_wishes,
+            receiver.preference_dislikes,
+            receiver.preference_sizes,
+        )
         .join(receiver, giver.recipient_id == receiver.id)
         .filter(giver.id == p.id)
         .one()
@@ -306,6 +378,9 @@ def do_reveal(reveal_token: str, db: Session = Depends(get_db)):
         "event_name": event.name,
         "participant_name": row[0],
         "recipient_name": row[1],
+        "recipient_preference": recipient_preference_out(
+            row[1], row[2], row[3], row[4]
+        ),
     }
 
 

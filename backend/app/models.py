@@ -1,7 +1,7 @@
 """SQLAlchemy 数据模型。"""
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
@@ -52,6 +52,14 @@ class Participant(Base):
         ForeignKey("participants.id", ondelete="SET NULL"), nullable=True
     )
     revealed: Mapped[bool] = mapped_column(default=False, nullable=False)
+    # 礼物偏好卡：只有持有者通过自己的揭晓链接可读写；抽签完成后锁定。
+    # 组织者接口只回传“是否已填写”（preference_filled），绝不返回以下内容。
+    preference_wishes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    preference_dislikes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    preference_sizes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    preference_updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
     event: Mapped[Event] = relationship(back_populates="participants")

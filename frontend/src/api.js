@@ -37,4 +37,6 @@ export const setForbiddenPairs = (id, token, pairs) =>
 export const drawEvent = (id, token) =>
   request(`/api/events/${id}/draw`, { method: 'POST', organizerToken: token })
 export const getReveal = (revealToken) => request(`/api/reveal/${revealToken}`)
+export const putPreferences = (revealToken, payload) =>
+  request(`/api/reveal/${revealToken}/preferences`, { method: 'PUT', body: payload })
 export const postReveal = (revealToken) => request(`/api/reveal/${revealToken}`, { method: 'POST' })

@@ -185,23 +185,31 @@ export default function EventPage() {
 
       <section className="block">
         <h2>参与者（{event.participants.length} 人）</h2>
+        <p className="hint">
+          偏好卡由参与者通过自己的揭晓链接填写，抽签前可反复修改、抽签后锁定；
+          组织者只能看到“已填 / 未填”，无法查看具体内容。
+        </p>
         <ul className="people">
           {event.participants.map((p) => (
             <li key={p.id}>
               <span className="person-name">{p.name}</span>
-              {drawn ? (
-                <span className="reveal-state">
-                  {p.revealed ? (
+              <span className="reveal-state">
+                <em className={p.preference_filled ? 'pref-filled' : 'pref-empty'}>
+                  {p.preference_filled ? '偏好卡已填' : '偏好卡未填'}
+                </em>
+                {drawn ? (
+                  p.revealed ? (
                     <em className="revealed">已揭晓</em>
                   ) : (
                     <em className="unrevealed">尚未揭晓</em>
-                  )}
-                </span>
-              ) : (
-                <button className="link-btn danger" onClick={() => handleDeleteName(p.id)}>
-                  删除
-                </button>
-              )}
+                  )
+                ) : null}
+                {!drawn && (
+                  <button className="link-btn danger" onClick={() => handleDeleteName(p.id)}>
+                    删除
+                  </button>
+                )}
+              </span>
             </li>
           ))}
         </ul>
@@ -273,6 +281,9 @@ export default function EventPage() {
               <li key={p.id}>
                 <div className="link-row">
                   <strong>{p.name}</strong>
+                  <span className={p.preference_filled ? 'pref-filled' : 'pref-empty'}>
+                    {p.preference_filled ? '偏好卡已填' : '偏好卡未填'}
+                  </span>
                   <span className={p.revealed ? 'revealed' : 'unrevealed'}>
                     {p.revealed ? '已揭晓' : '未揭晓'}
                   </span>

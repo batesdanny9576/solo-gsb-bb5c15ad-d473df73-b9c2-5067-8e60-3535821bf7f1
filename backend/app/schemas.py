@@ -1,5 +1,27 @@
 """请求 / 响应 Pydantic 模型。"""
+from typing import Annotated
+
 from pydantic import BaseModel, Field, field_validator
+from pydantic.functional_validators import AfterValidator
+
+
+def _preference_text(v: str) -> str:
+    """偏好字段统一去除首尾空白；允许空字符串（表示未填 / 清空）。"""
+    return (v or "").strip()
+
+
+PreferenceField = Annotated[
+    str,
+    Field(default="", max_length=2000),
+    AfterValidator(_preference_text),
+]
+
+
+class PreferenceUpdate(BaseModel):
+    """参与者通过自己的揭晓链接提交的礼物偏好卡（抽签前可反复修改）。"""
+    wishes: PreferenceField = ""
+    dislikes: PreferenceField = ""
+    sizes: PreferenceField = ""
 
 
 class EventCreate(BaseModel):

@@ -204,7 +204,195 @@ r = client.get(f"/api/events/{e2}", headers=H2)
 check(len(r.json()["participants"]) == 2 and len(r.json()["forbidden_pairs"]) == 0,
       "删除后禁配被级联清理")
 
-# ---------- 7. health ----------
+# ---------- 7. 礼物偏好卡 ----------
+print("== 礼物偏好卡 ==")
+r = client.post("/api/events", json={
+    "name": "偏好局",
+    "participants": ["甲", "乙", "丙"],
+})
+pev = r.json()
+pid, ptok = pev["id"], pev["organizer_token"]
+PH = {"X-Organizer-Token": ptok}
+toks = {p["name"]: p["reveal_token"] for p in pev["participants"]}
+
+# 初始：未填写，GET 自己的链接可见空偏好卡
+r = client.get(f"/api/reveal/{toks['甲']}")
+check(r.status_code == 200, "GET 本人链接 200")
+pref = r.json()["preference"]
+check(pref["filled"] is False and pref["wishes"] == "" and pref["updated_at"] is None,
+      "初始偏好卡为空且未填写")
+
+# 组织者只看到 preference_filled=False，看不到内容
+r = client.get(f"/api/events/{pid}", headers=PH)
+raw = r.text
+pa = next(p for p in r.json()["participants"] if p["name"] == "甲")
+check(pa["preference_filled"] is False, "组织者见甲未填写")
+check("preference_wishes" not in raw and "preference_dislikes" not in raw
+      and "preference_sizes" not in raw, "组织者响应不含任何偏好卡内容字段")
+
+# 甲填写偏好卡
+r = client.put(f"/api/reveal/{toks['甲']}/preferences", json={
+    "wishes": "悬疑小说", "dislikes": "对坚果过敏", "sizes": "上衣 L",
+})
+check(r.status_code == 200 and r.json()["filled"] is True and r.json()["updated_at"],
+      "甲保存偏好卡成功，返回已填写与时间戳")
+
+# 组织者只能看到 filled 变为 True，仍看不到内容
+r = client.get(f"/api/events/{pid}", headers=PH)
+pa = next(p for p in r.json()["participants"] if p["name"] == "甲")
+check(pa["preference_filled"] is True, "组织者见甲已填写")
+check("悬疑小说" not in r.text and "坚果" not in r.text and "上衣 L" not in r.text,
+      "组织者响应中不含偏好内容")
+
+# 甲可反复修改
+r = client.put(f"/api/reveal/{toks['甲']}/preferences", json={
+    "wishes": "  机械键盘  ", "dislikes": "不喝酒", "sizes": "鞋码 41",
+})
+check(r.status_code == 200 and r.json()["wishes"] == "机械键盘", "甲再次修改成功（首尾空白被去除）")
+r = client.get(f"/api/reveal/{toks['甲']}")
+check(r.json()["preference"]["wishes"] == "机械键盘", "再次 GET 看到的是最新内容")
+
+# 乙的链接看不到甲的内容
+r = client.get(f"/api/reveal/{toks['乙']}")
+body = r.text
+check("机械键盘" not in body and "不喝酒" not in body and "鞋码 41" not in body,
+      "他人链接中不出现甲的偏好内容")
+check(r.json()["preference"]["filled"] is False, "乙自己的偏好卡仍为空")
+
+# 抽签前揭晓不允许
+r = client.post(f"/api/reveal/{toks['甲']}")
+check(r.status_code == 409 and "尚未" in r.json()["detail"], "抽签前揭晓被拒绝")
+
+# 非法输入
+r = client.put(f"/api/reveal/{toks['甲']}/preferences", json={"wishes": "x" * 5000})
+check(r.status_code == 422, "超长字段 422")
+r = client.put("/api/reveal/does-not-exist/preferences", json={"wishes": "x"})
+check(r.status_code == 404, "无效链接填写偏好卡 404")
+
+# 抽签
+r = client.post(f"/api/events/{pid}/draw", headers=PH)
+check(r.status_code == 200, f"偏好局抽签成功 -> {r.status_code}")
+drawn = r.json()
+
+# 抽签后偏好卡锁定
+r = client.put(f"/api/reveal/{toks['甲']}/preferences", json={"wishes": "想改"})
+check(r.status_code == 409, "抽签后修改偏好卡被拒绝（锁定）")
+
+# 状态接口仍可读本人偏好卡（锁定的只读副本），但不含任何他人内容
+r = client.get(f"/api/reveal/{toks['甲']}")
+j = r.json()
+check(j["preference"]["wishes"] == "机械键盘", "锁定后仍可只读查看本人偏好卡")
+check("recipient" not in r.text, "状态接口不泄露收礼对象及其偏好")
+
+# 揭晓后一次性拿到收礼人姓名 + 对方偏好卡
+giver = next(p for p in drawn["participants"] if p["name"] == "甲")
+r = client.post(f"/api/reveal/{toks['甲']}")
+check(r.status_code == 200, f"甲揭晓成功 -> {r.status_code}")
+rev = r.json()
+recipient_name = rev["recipient_name"]
+check("recipient_preference" in rev, "揭晓响应包含对方偏好卡")
+
+# 直接读收礼人的链接，核对偏好卡内容一致（只有抽中者的揭晓结果才带这份内容）
+r2 = client.get(f"/api/reveal/{toks[recipient_name]}")
+expected_pref = r2.json()["preference"]
+check(rev["recipient_preference"]["name"] == recipient_name, "偏好卡归属姓名正确")
+check(rev["recipient_preference"]["wishes"] == expected_pref["wishes"]
+      and rev["recipient_preference"]["dislikes"] == expected_pref["dislikes"]
+      and rev["recipient_preference"]["sizes"] == expected_pref["sizes"]
+      and rev["recipient_preference"]["filled"] == expected_pref["filled"],
+      "揭晓所得对方偏好卡与本人填写的内容一致")
+
+# 二次揭晓：409 且不再带偏好卡 / 结果
+r = client.post(f"/api/reveal/{toks['甲']}")
+check(r.status_code == 409, "二次揭晓仍被拒绝")
+check("recipient" not in r.text and "机械键盘" not in r.text,
+      "二次揭晓响应不含结果与偏好内容")
+r = client.get(f"/api/reveal/{toks['甲']}")
+check(r.json()["revealed"] is True, "状态显示已揭晓")
+
+# 乙揭晓：响应里的偏好卡只属于乙的收礼人，且不会出现甲的内容（乙的收礼人≠甲时）
+r = client.post(f"/api/reveal/{toks['乙']}")
+check(r.status_code == 200, f"乙揭晓成功 -> {r.status_code}")
+body = r.text
+if r.json()["recipient_name"] != "甲":
+    check("机械键盘" not in body and "不喝酒" not in body and "鞋码 41" not in body,
+          "非收礼人偏好卡不出现在乙的揭晓结果中")
+else:
+    check("机械键盘" in body, "乙的收礼人恰为甲时，才在结果中看到甲的偏好卡")
+
+# 两人局：双方都未填写 -> 揭晓时对方偏好卡 filled=False
+r = client.post("/api/events", json={"name": "空卡局", "participants": ["a", "b"]})
+ev2 = r.json()
+eid2, tok2 = ev2["id"], ev2["organizer_token"]
+ta = next(p for p in ev2["participants"] if p["name"] == "a")["reveal_token"]
+client.post(f"/api/events/{eid2}/draw", headers={"X-Organizer-Token": tok2})
+r = client.post(f"/api/reveal/{ta}")
+check(r.status_code == 200, "空卡局揭晓成功")
+check(r.json()["recipient_preference"] == {
+    "name": r.json()["recipient_name"], "wishes": "", "dislikes": "",
+    "sizes": "", "filled": False,
+}, "对方未填写时偏好卡为空卡结构")
+
+# 全部清空 -> 回到未填写
+r = client.post("/api/events", json={"name": "清空局", "participants": ["a", "b"]})
+ev3 = r.json()
+ta3 = next(p for p in ev3["participants"] if p["name"] == "a")["reveal_token"]
+r = client.put(f"/api/reveal/{ta3}/preferences",
+               json={"wishes": "x", "dislikes": "y", "sizes": "z"})
+check(r.json()["filled"] is True, "填写后为已填")
+r = client.put(f"/api/reveal/{ta3}/preferences",
+               json={"wishes": "   ", "dislikes": "", "sizes": ""})
+check(r.json()["filled"] is False and r.json()["updated_at"] is None,
+      "全部清空后回到未填写状态")
+r = client.get(f"/api/reveal/{ta3}")
+check(r.json()["preference"]["wishes"] == "" and r.json()["preference"]["filled"] is False,
+      "空白内容被规范化为空串")
+
+# ---------- 8. 旧数据库自动补列（持久化迁移，幂等） ----------
+print("== 旧库迁移 ==")
+import sqlite3  # noqa: E402
+
+old_path = os.path.join(tmp, "old_schema.db")
+con = sqlite3.connect(old_path)
+con.execute(
+    "CREATE TABLE events (id INTEGER PRIMARY KEY, name VARCHAR(200) NOT NULL, "
+    "organizer_token VARCHAR(64) UNIQUE NOT NULL, status VARCHAR(20) NOT NULL, "
+    "failure_reason VARCHAR(1000), created_at DATETIME NOT NULL)"
+)
+con.execute(
+    "CREATE TABLE participants (id INTEGER PRIMARY KEY, event_id INTEGER NOT NULL, "
+    "name VARCHAR(100) NOT NULL, reveal_token VARCHAR(64) UNIQUE NOT NULL, "
+    "recipient_id INTEGER, revealed BOOLEAN NOT NULL DEFAULT 0, "
+    "created_at DATETIME NOT NULL)"
+)
+con.execute(
+    "INSERT INTO events VALUES (1, '旧局', 'oldtok', 'pending', NULL, '2026-01-01 00:00:00')"
+)
+con.execute(
+    "INSERT INTO participants VALUES (1, 1, '老兵', 'oldreveal', NULL, 0, "
+    "'2026-01-01 00:00:00')"
+)
+con.commit()
+con.close()
+
+from sqlalchemy import create_engine as _create_engine  # noqa: E402
+
+from app.database import _apply_migrations  # noqa: E402
+
+old_engine = _create_engine(f"sqlite:///{old_path}", future=True)
+_apply_migrations(old_engine)  # 首次：补列
+_apply_migrations(old_engine)  # 再次：幂等不报错
+cols = {r[1] for r in sqlite3.connect(old_path).execute("PRAGMA table_info(participants)")}
+check({"preference_wishes", "preference_dislikes", "preference_sizes",
+       "preference_updated_at"} <= cols, "旧 participants 表自动补出 4 个偏好列")
+# 存量数据仍在，且新列默认 NULL（视为未填写）
+row = sqlite3.connect(old_path).execute(
+    "SELECT name, preference_wishes FROM participants WHERE id = 1"
+).fetchone()
+check(row == ("老兵", None), f"存量参与者数据保留: {row}")
+old_engine.dispose()
+
+# ---------- 9. health ----------
 r = client.get("/health")
 check(r.status_code == 200 and r.json()["status"] == "ok", "health ok")
 
