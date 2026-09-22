@@ -1,0 +1,26 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: secret-santa:latest
+    container_name: secret-santa
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    environment:
+      # SQLite 数据库文件位置（位于持久化卷内）
+      DATABASE_PATH: /data/secret_santa.db
+      DATABASE_URL: sqlite:////data/secret_santa.db
+      # 如需覆盖宿主机映射端口，设置环境变量 APP_PORT，或直接修改 ports
+      APP_PORT: "${APP_PORT:-8000}"
+    volumes:
+      - secret-santa-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  secret-santa-data:

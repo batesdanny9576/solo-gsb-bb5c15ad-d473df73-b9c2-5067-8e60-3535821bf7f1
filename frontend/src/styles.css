@@ -1,0 +1,142 @@
+:root {
+  --bg: #0f172a;
+  --panel: #ffffff;
+  --accent: #e11d48;
+  --accent-dark: #be123c;
+  --text: #1e293b;
+  --muted: #64748b;
+  --line: #e2e8f0;
+  --ok: #059669;
+  --warn-bg: #fef2f2;
+  --warn-line: #fecaca;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  background: linear-gradient(160deg, #1e293b 0%, #0f172a 100%);
+  color: var(--text);
+  min-height: 100vh;
+}
+
+.app { max-width: 760px; margin: 0 auto; padding: 0 16px 48px; }
+
+.topbar { padding: 20px 4px; }
+.brand { color: #fff; text-decoration: none; font-size: 20px; font-weight: 700; }
+.footer { text-align: center; color: #94a3b8; font-size: 13px; margin-top: 24px; }
+
+.card {
+  background: var(--panel);
+  border-radius: 16px;
+  padding: 28px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
+}
+.card.center { text-align: center; }
+.card h1 { margin: 0 0 8px; font-size: 24px; }
+.card h2 { font-size: 17px; margin: 0 0 12px; }
+
+.hint { color: var(--muted); font-size: 14px; line-height: 1.6; }
+
+.field { display: block; margin: 18px 0; }
+.field > span { display: block; font-weight: 600; margin-bottom: 6px; font-size: 14px; }
+
+input, select, textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 15px;
+  font-family: inherit;
+  background: #fff;
+}
+textarea { resize: vertical; }
+input:focus, select:focus, textarea:focus { outline: 2px solid #fda4af; border-color: var(--accent); }
+
+button {
+  cursor: pointer;
+  border: 1px solid var(--line);
+  background: #f8fafc;
+  border-radius: 8px;
+  padding: 9px 16px;
+  font-size: 14px;
+  font-family: inherit;
+}
+button:hover { background: #f1f5f9; }
+button:disabled { opacity: 0.6; cursor: default; }
+
+.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  margin-top: 8px;
+}
+.primary:hover { background: var(--accent-dark); }
+.primary.big { font-size: 17px; padding: 14px 28px; border-radius: 12px; }
+
+.link-btn { border: none; background: none; color: var(--accent); padding: 2px 6px; font-size: 13px; }
+.link-btn:hover { text-decoration: underline; background: none; }
+.link-btn.danger { color: #dc2626; }
+
+.error {
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-line);
+  color: #991b1b;
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin: 14px 0;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.badge { border-radius: 999px; padding: 3px 12px; font-size: 13px; font-weight: 600; }
+.badge-pending { background: #fef9c3; color: #854d0e; }
+.badge-done { background: #d1fae5; color: #065f46; }
+
+.event-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.block { margin-top: 26px; padding-top: 20px; border-top: 1px solid var(--line); }
+
+.people, .pairs, .links { list-style: none; padding: 0; margin: 0 0 10px; }
+.people li, .pair-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 10px; border-radius: 8px;
+}
+.people li:nth-child(odd), .pair-row:nth-child(odd), .links li { background: #f8fafc; }
+.person-name { font-weight: 500; }
+
+.inline-form { display: flex; gap: 8px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
+.inline-form input { flex: 1 1 160px; width: auto; }
+.inline-form select { flex: 1 1 120px; width: auto; }
+.pair-x { color: var(--muted); }
+
+.links li { padding: 10px 12px; border-radius: 8px; margin-bottom: 8px; }
+.link-row { display: flex; align-items: center; gap: 12px; }
+.link-url { display: block; margin-top: 4px; font-size: 12px; color: var(--muted); word-break: break-all; }
+
+.revealed { color: var(--ok); font-style: normal; font-size: 13px; }
+.unrevealed { color: #b45309; font-style: normal; font-size: 13px; }
+
+.token-form { display: flex; gap: 8px; margin-top: 16px; }
+.token-form input { flex: 1; }
+.token-form .primary { margin-top: 0; }
+
+.person-label { font-size: 18px; font-weight: 600; }
+.recipient {
+  font-size: 30px;
+  font-weight: 800;
+  color: var(--accent-dark);
+  margin: 18px 0;
+  padding: 18px;
+  background: #fff1f2;
+  border-radius: 12px;
+}
+.result { animation: pop 0.25s ease; }
+@keyframes pop { from { transform: scale(0.96); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+@media (max-width: 520px) {
+  .card { padding: 20px; }
+  .recipient { font-size: 24px; }
+}
